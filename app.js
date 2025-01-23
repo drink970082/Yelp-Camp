@@ -3,11 +3,12 @@ const express = require('express');
 const path = require('path');
 const mongoose = require('mongoose'); // mongoose is a MongoDB object modeling tool designed to work in an asynchronous environment
 const ejsMate = require('ejs-mate'); // ejs-mate is a layout engine for ejs
-const { campgroundSchema } = require('./schemas.js'); // import the schema for the campground data
+const { campgroundSchema, reviewSchema } = require('./schemas.js'); // import the schema for the campground data
 const catchAsync = require('./utils/catchAsync'); // catchAsync is a function that wraps async functions to catch errors
 const ExpressError = require('./utils/ExpressError'); // ExpressError is a class that extends the Error class
 const methodOverride = require('method-override'); // method-override is a middleware that allows the use of HTTP verbs such as PUT or DELETE in places where the client doesn't support it
 const Campground = require('./models/campground'); // import the Campground model
+const Review = require('./models/review'); // import the Review model
 
 /* connect to mongodb with name "yelp-camp" */
 mongoose.connect('mongodb://localhost:27017/yelp-camp', {});
@@ -37,7 +38,7 @@ const validateCampground = (req, res, next) => {
     // validate the request body with the campgroundSchema, return error(s)(an array) if invalid
     const { error } = campgroundSchema.validate(req.body);
     if (error) {
-        const message =error.details.map(el => el.message).join(',');
+        const message = error.details.map(el => el.message).join(',');
         throw new ExpressError(message, 400);
     }
     else {
@@ -45,6 +46,19 @@ const validateCampground = (req, res, next) => {
         next();
     }
 };
+
+const validateReview = (req, res, next) => {
+    // validate the request body with the campgroundSchema, return error(s)(an array) if invalid
+    const { error } = reviewSchema.validate(req.body);
+    if (error) {
+        const message = error.details.map(el => el.message).join(',');
+        throw new ExpressError(message, 400);
+    }
+    else {
+        // if no error then pass it to the route handler
+        next();
+    }
+}
 
 /* home route */
 app.get('/', (req, res) => {
@@ -74,7 +88,7 @@ app.post('/campgrounds', validateCampground, catchAsync(async (req, res, next) =
 
 /* show details of a campground */
 app.get('/campgrounds/:id', catchAsync(async (req, res) => {
-    const campground = await Campground.findById(req.params.id); // fetch campground by id
+    const campground = await Campground.findById(req.params.id).populate('reviews'); // fetch campground by id and populate reviews
     res.render('campgrounds/show', { campground });
 }));
 
@@ -99,6 +113,25 @@ app.delete('/campgrounds/:id', catchAsync(async (req, res) => {
     const { id } = req.params;
     await Campground.findByIdAndDelete(id);
     res.redirect('/campgrounds');
+}));
+
+/* add review */
+app.post('/campgrounds/:id/reviews', validateReview, catchAsync(async (req, res, next) => {
+
+    const campground = await Campground.findById(req.params.id);
+    const review = new Review(req.body.review);
+    campground.reviews.push(review);
+    await review.save();
+    await campground.save();
+    res.redirect(`/campgrounds/${campground._id}`);
+}));
+
+/* delete review at both campground and review schema*/
+app.delete('/campgrounds/:id/reviews/:reviewId', catchAsync(async (req, res) => {
+    const { id, reviewId } = req.params;
+    await Campground.findByIdAndUpdate(id, { $pull: { reviews: reviewId } }); // remove review from campground, pull method removes all instances of a value from an array
+    await Review.findByIdAndDelete(reviewId);
+    res.redirect(`/campgrounds/${id}`);
 }));
 
 /* route handler that triggers when visiting a route that doesn't exist */
